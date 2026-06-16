@@ -49,6 +49,7 @@ enum AiRequestType {
 enum AiProvider {
   ANTHROPIC
   OPENAI
+  GROQ
 }
 
 enum AiRequestStatus {

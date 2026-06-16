@@ -9,6 +9,7 @@ import {
   AiProviderClient,
   AiTier,
 } from './providers/ai-provider.interface';
+import { GroqProvider } from './providers/groq.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 
 /** Маршрутизация: какой «класс» модели нужен под каждый тип задачи. */
@@ -42,27 +43,49 @@ export class AiOrchestratorService {
     private readonly config: ConfigService,
     anthropic: AnthropicProvider,
     openai: OpenAiProvider,
+    groq: GroqProvider,
   ) {
     this.providers = {
       [AiProvider.ANTHROPIC]: anthropic,
       [AiProvider.OPENAI]: openai,
+      [AiProvider.GROQ]: groq,
     };
   }
 
-  /** Выбор провайдера: дефолт из конфига, с фолбэком на сконфигурированный. */
-  private pickProvider(): AiProviderClient {
-    const preferred = (
-      this.config.get<string>('AI_DEFAULT_PROVIDER', 'anthropic') === 'openai'
-        ? AiProvider.OPENAI
-        : AiProvider.ANTHROPIC
-    );
-    if (this.providers[preferred].isConfigured()) return this.providers[preferred];
-
-    const fallback = Object.values(this.providers).find((p) => p.isConfigured());
-    if (!fallback) {
-      throw new BadRequestException('Не настроен ни один AI-провайдер (ANTHROPIC_API_KEY / OPENAI_API_KEY)');
+  private defaultProvider(): AiProvider {
+    switch (this.config.get<string>('AI_DEFAULT_PROVIDER', 'anthropic')) {
+      case 'openai':
+        return AiProvider.OPENAI;
+      case 'groq':
+        return AiProvider.GROQ;
+      default:
+        return AiProvider.ANTHROPIC;
     }
-    this.logger.warn(`Провайдер ${preferred} не настроен, использую ${fallback.provider}`);
+  }
+
+  /**
+   * Выбор провайдера: дефолт из конфига, с фолбэком на сконфигурированный.
+   * Для vision (фото) Groq на free-плане не подходит — берём только vision-провайдеры.
+   */
+  private pickProvider(needsVision = false): AiProviderClient {
+    const visionCapable = new Set<AiProvider>([AiProvider.ANTHROPIC, AiProvider.OPENAI]);
+    const eligible = (p: AiProviderClient) =>
+      p.isConfigured() && (!needsVision || visionCapable.has(p.provider));
+
+    const preferred = this.providers[this.defaultProvider()];
+    if (eligible(preferred)) return preferred;
+
+    const fallback = Object.values(this.providers).find(eligible);
+    if (!fallback) {
+      throw new BadRequestException(
+        needsVision
+          ? 'Для фото-задания нужен vision-провайдер (ANTHROPIC_API_KEY или OPENAI_API_KEY)'
+          : 'Не настроен ни один AI-провайдер (ANTHROPIC_API_KEY / OPENAI_API_KEY / GROQ_API_KEY)',
+      );
+    }
+    if (fallback !== preferred) {
+      this.logger.warn(`Провайдер ${preferred.provider} не подходит, использую ${fallback.provider}`);
+    }
     return fallback;
   }
 
@@ -81,7 +104,7 @@ export class AiOrchestratorService {
       }
     }
 
-    const provider = this.pickProvider();
+    const provider = this.pickProvider(Boolean(params.imageBase64));
     const req: AiCompletionRequest = {
       system: params.system,
       user: params.user,

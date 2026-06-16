@@ -15,7 +15,7 @@ Backend ИИ-приложения подготовки к ЕГЭ. Не «ещё 
 | ORM          | Prisma 5                                     |
 | БД           | Supabase Postgres → self-hosted Postgres после MVP |
 | Очереди      | BullMQ (Redis) — дорогие ИИ-задачи          |
-| AI           | Claude API (Anthropic) + OpenAI API за абстракцией |
+| AI           | Claude (Anthropic) + OpenAI + Groq за абстракцией (дефолт — Groq, бесплатный) |
 | Хранилище    | Supabase Storage → S3 (за `StorageService`) |
 | Платежи      | webhook (ЮKassa)                            |
 | Auth         | собственный JWT (не Supabase Auth)          |
@@ -70,8 +70,10 @@ src/
 
 ## AI Orchestrator (раздел 7.6)
 
+- Провайдеры: **Groq** (дефолт, бесплатный, OpenAI-совместимый), Anthropic, OpenAI.
 - Маршрутизация по типу задачи на «класс» модели: `fast` (автопроверка) / `smart`
-  (сочинение, план) / `heavy` (фото-разбор).
+  (сочинение, план) / `heavy` (фото-разбор). Фото (vision) на Groq недоступно —
+  оркестратор сам переключает `photo-task` на Anthropic/OpenAI.
 - Логирование **каждого** запроса в `ai_requests`: провайдер, модель, токены, стоимость, статус.
 - Строгий JSON-ответ + парсинг/валидация; `confidence_score` для спорных ответов.
 - Кеш повторяемых объяснений по `cache_key`.

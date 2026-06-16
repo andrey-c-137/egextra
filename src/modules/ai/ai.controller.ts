@@ -5,22 +5,32 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AiOrchestratorService } from './ai-orchestrator.service';
 import { CheckEssayDto, PhotoTaskDto } from './dto/ai.dto';
-import { buildEssayUserPrompt, ESSAY_CHECK_SYSTEM } from './prompts/essay-check.prompt';
+import {
+  buildEssayUserPrompt,
+  ESSAY_CHECK_PROMPT_KEY,
+  ESSAY_CHECK_SYSTEM,
+} from './prompts/essay-check.prompt';
+import { PromptsService } from './prompts/prompts.service';
 
 @ApiTags('ai')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('ai')
 export class AiController {
-  constructor(private readonly orchestrator: AiOrchestratorService) {}
+  constructor(
+    private readonly orchestrator: AiOrchestratorService,
+    private readonly prompts: PromptsService,
+  ) {}
 
   // Ключевая MVP-фича: проверка сочинения по критериям ФИПИ.
+  // Системный промпт берётся из prompt_templates (key=essay_check_ru) с фолбэком на дефолт.
   @Post('check-essay')
-  checkEssay(@CurrentUser() user: AuthUser, @Body() dto: CheckEssayDto) {
+  async checkEssay(@CurrentUser() user: AuthUser, @Body() dto: CheckEssayDto) {
+    const system = await this.prompts.getSystem(ESSAY_CHECK_PROMPT_KEY, ESSAY_CHECK_SYSTEM);
     return this.orchestrator.run({
       userId: user.id,
       type: AiRequestType.CHECK_ESSAY,
-      system: ESSAY_CHECK_SYSTEM,
+      system,
       user: buildEssayUserPrompt(dto.essay, dto.topic),
       jsonMode: true,
     });

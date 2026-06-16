@@ -1,4 +1,8 @@
-import { AnswerType, PrismaClient } from '@prisma/client';
+import { AiRequestType, AnswerType, PrismaClient } from '@prisma/client';
+import {
+  ESSAY_CHECK_PROMPT_KEY,
+  ESSAY_CHECK_SYSTEM,
+} from '../src/modules/ai/prompts/essay-check.prompt';
 
 const prisma = new PrismaClient();
 
@@ -38,8 +42,21 @@ async function main() {
     },
   });
 
+  // Активный промпт проверки сочинения (версия 1) — методист правит через админку.
+  await prisma.promptTemplate.upsert({
+    where: { key_version: { key: ESSAY_CHECK_PROMPT_KEY, version: 1 } },
+    update: { template: ESSAY_CHECK_SYSTEM, isActive: true },
+    create: {
+      key: ESSAY_CHECK_PROMPT_KEY,
+      version: 1,
+      type: AiRequestType.CHECK_ESSAY,
+      template: ESSAY_CHECK_SYSTEM,
+      isActive: true,
+    },
+  });
+
   // eslint-disable-next-line no-console
-  console.log('✅ Seed выполнен: русский язык + тема сочинения + задание');
+  console.log('✅ Seed выполнен: русский язык + тема сочинения + задание + промпт проверки сочинения');
 }
 
 main()
