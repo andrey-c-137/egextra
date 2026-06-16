@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AiRequestType, Role } from '@prisma/client';
+import { AiRequestType, ExamType, Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -16,8 +16,25 @@ export class AdminController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Post('subjects')
-  createSubject(@Body() body: { name: string; examType?: string }) {
-    return this.prisma.subject.create({ data: { name: body.name, examType: body.examType ?? 'EGE' } });
+  createSubject(
+    @Body()
+    body: {
+      code: string;
+      name: string;
+      examType: ExamType;
+      isMandatory?: boolean;
+      orderIndex?: number;
+    },
+  ) {
+    return this.prisma.subject.create({
+      data: {
+        code: body.code,
+        name: body.name,
+        examType: body.examType,
+        isMandatory: body.isMandatory ?? false,
+        orderIndex: body.orderIndex ?? 0,
+      },
+    });
   }
 
   @Post('topics')

@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AiRequestType } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { OnboardingGuard } from '../../common/guards/onboarding.guard';
 import { AiOrchestratorService } from './ai-orchestrator.service';
 import { CheckEssayDto, PhotoTaskDto } from './dto/ai.dto';
 import {
@@ -14,7 +15,7 @@ import { PromptsService } from './prompts/prompts.service';
 
 @ApiTags('ai')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OnboardingGuard)
 @Controller('ai')
 export class AiController {
   constructor(

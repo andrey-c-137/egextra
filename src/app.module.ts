@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { UsersModule } from './modules/users/users.module';
 import { SubjectsModule } from './modules/subjects/subjects.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -30,6 +31,7 @@ import { StorageModule } from './modules/storage/storage.module';
 
     // Доменные модули (1:1 с разделом 7.3 ТЗ)
     AuthModule,
+    OnboardingModule, // обязательный онбординг
     UsersModule, // User Profile
     SubjectsModule, // Subject & Topic
     TasksModule, // Task Bank

@@ -3,13 +3,14 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AiRequestType } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { OnboardingGuard } from '../../common/guards/onboarding.guard';
 import { AiOrchestratorService } from '../ai/ai-orchestrator.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Study Plan Module — генерация и перестройка персонального плана (эндпойнты Study Plan из 7.5)
 @ApiTags('study-plan')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OnboardingGuard)
 @Controller('study-plan')
 export class StudyPlanController {
   constructor(
@@ -34,14 +35,20 @@ export class StudyPlanController {
   @Post('generate')
   async generate(@CurrentUser() user: AuthUser, @Body('subjectId') subjectId: string) {
     const profile = await this.prisma.studentProfile.findUnique({ where: { userId: user.id } });
+    // Цель/уровень теперь хранятся per-subject в StudentSubject.
+    const studentSubject = profile
+      ? await this.prisma.studentSubject.findUnique({
+          where: { profileId_subjectId: { profileId: profile.id, subjectId } },
+        })
+      : null;
     const { data } = await this.ai.run({
       userId: user.id,
       type: AiRequestType.GENERATE_PLAN,
       system:
         'Ты — методист ЕГЭ. Составь персональный план подготовки по дням с учётом цели, даты и доступного времени. Верни JSON: {days:[{date, topics[], tasks[], estimated_minutes}], confidence_score}.',
-      user: `Предмет: ${subjectId}; цель: ${profile?.targetScore ?? '—'}; дата экзамена: ${
+      user: `Предмет: ${subjectId}; цель: ${studentSubject?.targetScore ?? '—'}; дата экзамена: ${
         profile?.examDate ?? '—'
-      }; минут/день: ${profile?.dailyMinutes ?? '—'}; текущий уровень: ${profile?.currentScore ?? '—'}`,
+      }; минут/день: ${profile?.dailyMinutes ?? '—'}; текущий уровень: ${studentSubject?.currentScore ?? '—'}`,
       jsonMode: true,
     });
     // TODO: распарсить data.days и сохранить StudyPlan + StudyPlanDay[]

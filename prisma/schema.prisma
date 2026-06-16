@@ -24,6 +24,18 @@ enum Role {
   ADMIN
 }
 
+// Трек подготовки: ОГЭ (8–9 класс) или ЕГЭ (10–11 класс)
+enum ExamType {
+  OGE
+  EGE
+}
+
+// Уровень математики на ЕГЭ
+enum MathLevel {
+  BASE
+  PROFILE
+}
+
 enum AnswerType {
   SHORT // короткий ответ (часть 1) — автопроверка
   ESSAY // сочинение — ИИ-проверка по критериям
@@ -150,20 +162,38 @@ model RefreshToken {
 }
 
 model StudentProfile {
-  id               String    @id @default(uuid()) @db.Uuid
-  userId           String    @unique @map("user_id") @db.Uuid
-  grade            Int? // класс
-  targetScore      Int?      @map("target_score")
-  currentScore     Int?      @map("current_score")
-  dailyMinutes     Int?      @map("daily_minutes")
-  examDate         DateTime? @map("exam_date")
-  selectedSubjects String[]  @map("selected_subjects") // массив subject.id
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @unique @map("user_id") @db.Uuid
+  examType            ExamType? @map("exam_type") // выбранный трек ОГЭ/ЕГЭ
+  grade               Int? // класс 8–11
+  dailyMinutes        Int?      @map("daily_minutes")
+  examDate            DateTime? @map("exam_date")
+  onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjects StudentSubject[]
 
   @@map("student_profiles")
+}
+
+// Выбранные учеником экзамены + цель по баллам на каждый
+model StudentSubject {
+  id           String     @id @default(uuid()) @db.Uuid
+  profileId    String     @map("profile_id") @db.Uuid
+  subjectId    String     @map("subject_id") @db.Uuid
+  targetScore  Int?       @map("target_score")
+  currentScore Int?       @map("current_score")
+  mathLevel    MathLevel? @map("math_level") // только для математики ЕГЭ
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  profile StudentProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, subjectId])
+  @@index([profileId])
+  @@map("student_subjects")
 }
 
 // Привязка родителя к ученику + права на отчёт/оплату
@@ -186,17 +216,22 @@ model ParentLink {
 // ------------------------------------------------------------
 
 model Subject {
-  id       String  @id @default(uuid()) @db.Uuid
-  name     String
-  examType String  @default("EGE") @map("exam_type") // EGE | OGE
-  isActive Boolean @default(true) @map("is_active")
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String // стабильный код для сидов: rus, math_prof, oge_phys ...
+  name        String
+  examType    ExamType @map("exam_type")
+  isMandatory Boolean  @default(false) @map("is_mandatory") // обязательный предмет трека
+  orderIndex  Int      @default(0) @map("order_index")
+  isActive    Boolean  @default(true) @map("is_active")
 
-  topics     Topic[]
-  tasks      Task[]
-  studyPlans StudyPlan[]
-  progress   TopicProgress[]
-  mockExams  MockExam[]
+  topics          Topic[]
+  tasks           Task[]
+  studyPlans      StudyPlan[]
+  progress        TopicProgress[]
+  mockExams       MockExam[]
+  studentSubjects StudentSubject[]
 
+  @@unique([examType, code])
   @@map("subjects")
 }
 

@@ -1,5 +1,11 @@
--- CreateEnum
+﻿-- CreateEnum
 CREATE TYPE "Role" AS ENUM ('STUDENT', 'PARENT', 'ADMIN');
+
+-- CreateEnum
+CREATE TYPE "ExamType" AS ENUM ('OGE', 'EGE');
+
+-- CreateEnum
+CREATE TYPE "MathLevel" AS ENUM ('BASE', 'PROFILE');
 
 -- CreateEnum
 CREATE TYPE "AnswerType" AS ENUM ('SHORT', 'ESSAY', 'CODE', 'PHOTO');
@@ -11,7 +17,7 @@ CREATE TYPE "CheckingType" AS ENUM ('AUTO', 'AI', 'HYBRID');
 CREATE TYPE "AiRequestType" AS ENUM ('CHECK_ANSWER', 'CHECK_ESSAY', 'EXPLAIN_TASK', 'PHOTO_TASK', 'GENERATE_PLAN', 'RECOMMENDATION');
 
 -- CreateEnum
-CREATE TYPE "AiProvider" AS ENUM ('ANTHROPIC', 'OPENAI');
+CREATE TYPE "AiProvider" AS ENUM ('ANTHROPIC', 'OPENAI', 'GROQ');
 
 -- CreateEnum
 CREATE TYPE "AiRequestStatus" AS ENUM ('QUEUED', 'PROCESSING', 'DONE', 'FAILED');
@@ -65,16 +71,28 @@ CREATE TABLE "refresh_tokens" (
 CREATE TABLE "student_profiles" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
+    "exam_type" "ExamType",
     "grade" INTEGER,
-    "target_score" INTEGER,
-    "current_score" INTEGER,
     "daily_minutes" INTEGER,
     "exam_date" TIMESTAMP(3),
-    "selected_subjects" TEXT[],
+    "onboarding_completed" BOOLEAN NOT NULL DEFAULT false,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "student_profiles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "student_subjects" (
+    "id" UUID NOT NULL,
+    "profile_id" UUID NOT NULL,
+    "subject_id" UUID NOT NULL,
+    "target_score" INTEGER,
+    "current_score" INTEGER,
+    "math_level" "MathLevel",
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "student_subjects_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -91,8 +109,11 @@ CREATE TABLE "parent_links" (
 -- CreateTable
 CREATE TABLE "subjects" (
     "id" UUID NOT NULL,
+    "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "exam_type" TEXT NOT NULL DEFAULT 'EGE',
+    "exam_type" "ExamType" NOT NULL,
+    "is_mandatory" BOOLEAN NOT NULL DEFAULT false,
+    "order_index" INTEGER NOT NULL DEFAULT 0,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "subjects_pkey" PRIMARY KEY ("id")
@@ -322,7 +343,16 @@ CREATE INDEX "refresh_tokens_user_id_idx" ON "refresh_tokens"("user_id");
 CREATE UNIQUE INDEX "student_profiles_user_id_key" ON "student_profiles"("user_id");
 
 -- CreateIndex
+CREATE INDEX "student_subjects_profile_id_idx" ON "student_subjects"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "student_subjects_profile_id_subject_id_key" ON "student_subjects"("profile_id", "subject_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "parent_links_parent_id_student_id_key" ON "parent_links"("parent_id", "student_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "subjects_exam_type_code_key" ON "subjects"("exam_type", "code");
 
 -- CreateIndex
 CREATE INDEX "topics_subject_id_idx" ON "topics"("subject_id");
@@ -386,6 +416,12 @@ ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "student_profiles" ADD CONSTRAINT "student_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "student_subjects" ADD CONSTRAINT "student_subjects_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "student_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "student_subjects" ADD CONSTRAINT "student_subjects_subject_id_fkey" FOREIGN KEY ("subject_id") REFERENCES "subjects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "parent_links" ADD CONSTRAINT "parent_links_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -452,3 +488,4 @@ ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "analytics_events" ADD CONSTRAINT "analytics_events_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

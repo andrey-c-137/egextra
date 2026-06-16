@@ -1,4 +1,4 @@
-import { AiRequestType, AnswerType, PrismaClient } from '@prisma/client';
+import { AiRequestType, AnswerType, ExamType, PrismaClient } from '@prisma/client';
 import {
   ESSAY_CHECK_PROMPT_KEY,
   ESSAY_CHECK_SYSTEM,
@@ -6,21 +6,78 @@ import {
 
 const prisma = new PrismaClient();
 
-// Минимальный сид для MVP по русскому языку.
+type SubjectSeed = { code: string; name: string; mandatory?: boolean };
+
+// Каталог ЕГЭ (русский + математика — опорные; остальное по выбору)
+const EGE: SubjectSeed[] = [
+  { code: 'rus', name: 'Русский язык', mandatory: true },
+  { code: 'math_prof', name: 'Математика (профильная)' },
+  { code: 'math_base', name: 'Математика (базовая)' },
+  { code: 'inf', name: 'Информатика' },
+  { code: 'phys', name: 'Физика' },
+  { code: 'chem', name: 'Химия' },
+  { code: 'bio', name: 'Биология' },
+  { code: 'hist', name: 'История' },
+  { code: 'soc', name: 'Обществознание' },
+  { code: 'geo', name: 'География' },
+  { code: 'lit', name: 'Литература' },
+  { code: 'eng', name: 'Английский язык' },
+  { code: 'ger', name: 'Немецкий язык' },
+  { code: 'fr', name: 'Французский язык' },
+  { code: 'esp', name: 'Испанский язык' },
+  { code: 'chi', name: 'Китайский язык' },
+];
+
+// Каталог ОГЭ (русский + математика обязательны, минимум 2 по выбору)
+const OGE: SubjectSeed[] = [
+  { code: 'rus', name: 'Русский язык', mandatory: true },
+  { code: 'oge_math', name: 'Математика', mandatory: true },
+  { code: 'inf', name: 'Информатика' },
+  { code: 'phys', name: 'Физика' },
+  { code: 'chem', name: 'Химия' },
+  { code: 'bio', name: 'Биология' },
+  { code: 'hist', name: 'История' },
+  { code: 'soc', name: 'Обществознание' },
+  { code: 'geo', name: 'География' },
+  { code: 'lit', name: 'Литература' },
+  { code: 'eng', name: 'Английский язык' },
+  { code: 'ger', name: 'Немецкий язык' },
+  { code: 'fr', name: 'Французский язык' },
+  { code: 'esp', name: 'Испанский язык' },
+];
+
+async function seedCatalog(examType: ExamType, list: SubjectSeed[]) {
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    await prisma.subject.upsert({
+      where: { examType_code: { examType, code: s.code } },
+      update: { name: s.name, isMandatory: !!s.mandatory, orderIndex: i, isActive: true },
+      create: {
+        code: s.code,
+        name: s.name,
+        examType,
+        isMandatory: !!s.mandatory,
+        orderIndex: i,
+      },
+    });
+  }
+}
+
 async function main() {
-  const russian = await prisma.subject.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000001' },
-    update: {},
-    create: {
-      id: '00000000-0000-0000-0000-000000000001',
-      name: 'Русский язык',
-      examType: 'EGE',
-    },
+  await seedCatalog(ExamType.EGE, EGE);
+  await seedCatalog(ExamType.OGE, OGE);
+
+  // Контент для MVP: русский ЕГЭ — тема «Сочинение» + задание 27.
+  const rusEge = await prisma.subject.findUniqueOrThrow({
+    where: { examType_code: { examType: ExamType.EGE, code: 'rus' } },
   });
 
-  const topic = await prisma.topic.create({
-    data: {
-      subjectId: russian.id,
+  const topic = await prisma.topic.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000010' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000010',
+      subjectId: rusEge.id,
       name: 'Сочинение (часть 2)',
       egeBlock: 'Часть 2',
       egeTaskNumbers: [27],
@@ -29,20 +86,23 @@ async function main() {
     },
   });
 
-  await prisma.task.create({
-    data: {
-      subjectId: russian.id,
+  await prisma.task.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000011' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000011',
+      subjectId: rusEge.id,
       topicId: topic.id,
       egeTaskNumber: 27,
       title: 'Сочинение по тексту',
       text: 'Напишите сочинение по прочитанному тексту (объём не менее 150 слов).',
       answerType: AnswerType.ESSAY,
-      maxScore: 21,
+      maxScore: 22,
       source: 'demo',
     },
   });
 
-  // Активный промпт проверки сочинения (версия 1) — методист правит через админку.
+  // Активный промпт проверки сочинения (версия 1).
   await prisma.promptTemplate.upsert({
     where: { key_version: { key: ESSAY_CHECK_PROMPT_KEY, version: 1 } },
     update: { template: ESSAY_CHECK_SYSTEM, isActive: true },
@@ -56,7 +116,9 @@ async function main() {
   });
 
   // eslint-disable-next-line no-console
-  console.log('✅ Seed выполнен: русский язык + тема сочинения + задание + промпт проверки сочинения');
+  console.log(
+    `✅ Seed: каталог ЕГЭ (${EGE.length}) + ОГЭ (${OGE.length}) + русский (тема, задание) + промпт`,
+  );
 }
 
 main()
