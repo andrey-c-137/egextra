@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+build/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# logs
+logs/
+*.log
+npm-debug.log*
+
+# prisma
+prisma/*.db
+
+# editor / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# tests
+coverage/

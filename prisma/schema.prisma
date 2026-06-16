@@ -1,0 +1,485 @@
+// ============================================================
+//  ЕГЭ AI — Prisma schema
+//  provider = postgresql → работает и на Supabase, и на self-hosted Postgres.
+//  Миграция Supabase → self-hosted после MVP: меняются только DATABASE_URL/DIRECT_URL.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooler (pgbouncer)
+  directUrl = env("DIRECT_URL")   // прямое соединение для миграций
+}
+
+// ------------------------------------------------------------
+//  Enums
+// ------------------------------------------------------------
+
+enum Role {
+  STUDENT
+  PARENT
+  ADMIN
+}
+
+enum AnswerType {
+  SHORT // короткий ответ (часть 1) — автопроверка
+  ESSAY // сочинение — ИИ-проверка по критериям
+  CODE // код (информатика)
+  PHOTO // фото решения — ИИ-разбор
+}
+
+enum CheckingType {
+  AUTO // сравнение с эталоном
+  AI // проверка моделью
+  HYBRID // авто + ИИ-перепроверка спорного
+}
+
+enum AiRequestType {
+  CHECK_ANSWER
+  CHECK_ESSAY
+  EXPLAIN_TASK
+  PHOTO_TASK
+  GENERATE_PLAN
+  RECOMMENDATION
+}
+
+enum AiProvider {
+  ANTHROPIC
+  OPENAI
+}
+
+enum AiRequestStatus {
+  QUEUED
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum PlanStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum PlanDayStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
+// Цветовая карта слабых тем: зелёный/жёлтый/красный/серый
+enum TopicStatus {
+  GREEN // освоено
+  YELLOW // нестабильно
+  RED // слабая тема
+  GRAY // не начато
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  CANCELED
+  REFUNDED
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  TELEGRAM
+  IN_APP
+}
+
+// ------------------------------------------------------------
+//  Auth & users
+// ------------------------------------------------------------
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  phone           String?   @unique
+  passwordHash    String    @map("password_hash")
+  role            Role      @default(STUDENT)
+  isEmailVerified Boolean   @default(false) @map("is_email_verified")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  studentProfile StudentProfile?
+  refreshTokens  RefreshToken[]
+  answers        UserAnswer[]
+  aiRequests     AiRequest[]
+  studyPlans     StudyPlan[]
+  topicProgress  TopicProgress[]
+  mockResults    MockExamResult[]
+  subscriptions  Subscription[]
+  notifications  Notification[]
+  analyticsEvents AnalyticsEvent[]
+
+  // связь родитель → ученики
+  childrenLinks ParentLink[] @relation("ParentToLinks")
+  parentLinks   ParentLink[] @relation("StudentToLinks")
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model StudentProfile {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @unique @map("user_id") @db.Uuid
+  grade            Int? // класс
+  targetScore      Int?      @map("target_score")
+  currentScore     Int?      @map("current_score")
+  dailyMinutes     Int?      @map("daily_minutes")
+  examDate         DateTime? @map("exam_date")
+  selectedSubjects String[]  @map("selected_subjects") // массив subject.id
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("student_profiles")
+}
+
+// Привязка родителя к ученику + права на отчёт/оплату
+model ParentLink {
+  id         String   @id @default(uuid()) @db.Uuid
+  parentId   String   @map("parent_id") @db.Uuid
+  studentId  String   @map("student_id") @db.Uuid
+  isApproved Boolean  @default(false) @map("is_approved")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  parent  User @relation("ParentToLinks", fields: [parentId], references: [id], onDelete: Cascade)
+  student User @relation("StudentToLinks", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+  @@map("parent_links")
+}
+
+// ------------------------------------------------------------
+//  Контент: предметы, темы, задания
+// ------------------------------------------------------------
+
+model Subject {
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String
+  examType String  @default("EGE") @map("exam_type") // EGE | OGE
+  isActive Boolean @default(true) @map("is_active")
+
+  topics     Topic[]
+  tasks      Task[]
+  studyPlans StudyPlan[]
+  progress   TopicProgress[]
+  mockExams  MockExam[]
+
+  @@map("subjects")
+}
+
+model Topic {
+  id            String  @id @default(uuid()) @db.Uuid
+  subjectId     String  @map("subject_id") @db.Uuid
+  parentTopicId String? @map("parent_topic_id") @db.Uuid
+  name          String
+  egeBlock      String? @map("ege_block")
+  egeTaskNumbers Int[]  @map("ege_task_numbers")
+  difficultyLevel Int   @default(1) @map("difficulty_level")
+  orderIndex    Int     @default(0) @map("order_index")
+
+  subject     Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  parentTopic Topic?  @relation("TopicTree", fields: [parentTopicId], references: [id])
+  children    Topic[] @relation("TopicTree")
+  tasks       Task[]
+  progress    TopicProgress[]
+
+  @@index([subjectId])
+  @@map("topics")
+}
+
+model Task {
+  id            String     @id @default(uuid()) @db.Uuid
+  subjectId     String     @map("subject_id") @db.Uuid
+  topicId       String?    @map("topic_id") @db.Uuid
+  egeTaskNumber Int?       @map("ege_task_number")
+  title         String?
+  text          String
+  imageUrl      String?    @map("image_url")
+  answerType    AnswerType @map("answer_type")
+  correctAnswer String?    @map("correct_answer")
+  explanation   String?
+  difficulty    Int        @default(1)
+  maxScore      Int        @default(1) @map("max_score")
+  source        String?
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  subject Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic   Topic?       @relation(fields: [topicId], references: [id])
+  answers UserAnswer[]
+
+  @@index([subjectId])
+  @@index([topicId])
+  @@map("tasks")
+}
+
+// ------------------------------------------------------------
+//  Ответы и проверка
+// ------------------------------------------------------------
+
+model UserAnswer {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @map("user_id") @db.Uuid
+  taskId           String       @map("task_id") @db.Uuid
+  answer           String?
+  isCorrect        Boolean?     @map("is_correct")
+  score            Int?
+  checkingType     CheckingType @map("checking_type")
+  aiFeedback       Json?        @map("ai_feedback")
+  mistakes         String[]
+  timeSpentSeconds Int?         @map("time_spent_seconds")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([taskId])
+  @@map("user_answers")
+}
+
+// ------------------------------------------------------------
+//  AI Orchestrator: лог каждого запроса (токены/стоимость/статус)
+// ------------------------------------------------------------
+
+model AiRequest {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String?         @map("user_id") @db.Uuid
+  requestType   AiRequestType   @map("request_type")
+  provider      AiProvider
+  model         String
+  inputPayload  Json            @map("input_payload")
+  outputPayload Json?           @map("output_payload")
+  inputTokens   Int?            @map("input_tokens")
+  outputTokens  Int?            @map("output_tokens")
+  estimatedCost Decimal?        @map("estimated_cost") @db.Decimal(10, 6)
+  confidenceScore Float?        @map("confidence_score")
+  status        AiRequestStatus @default(QUEUED)
+  error         String?
+  cacheKey      String?         @map("cache_key")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  completedAt   DateTime?       @map("completed_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([requestType])
+  @@index([cacheKey])
+  @@map("ai_requests")
+}
+
+// ------------------------------------------------------------
+//  План подготовки
+// ------------------------------------------------------------
+
+model StudyPlan {
+  id           String     @id @default(uuid()) @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  subjectId    String     @map("subject_id") @db.Uuid
+  targetScore  Int?       @map("target_score")
+  examDate     DateTime?  @map("exam_date")
+  dailyMinutes Int?       @map("daily_minutes")
+  status       PlanStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  days    StudyPlanDay[]
+
+  @@index([userId])
+  @@map("study_plans")
+}
+
+model StudyPlanDay {
+  id               String        @id @default(uuid()) @db.Uuid
+  planId           String        @map("plan_id") @db.Uuid
+  date             DateTime      @db.Date
+  topics           String[] // topic.id на день
+  tasks            String[] // task.id на день
+  estimatedMinutes Int?          @map("estimated_minutes")
+  status           PlanDayStatus @default(PLANNED)
+
+  plan StudyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("study_plan_days")
+}
+
+// ------------------------------------------------------------
+//  Прогресс по темам (карта слабых тем)
+// ------------------------------------------------------------
+
+model TopicProgress {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  subjectId       String      @map("subject_id") @db.Uuid
+  topicId         String      @map("topic_id") @db.Uuid
+  attempts        Int         @default(0)
+  accuracyPercent Float       @default(0) @map("accuracy_percent")
+  averageScore    Float       @default(0) @map("average_score")
+  status          TopicStatus @default(GRAY)
+  lastPracticedAt DateTime?   @map("last_practiced_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+  @@index([userId])
+  @@map("topic_progress")
+}
+
+// ------------------------------------------------------------
+//  Пробники
+// ------------------------------------------------------------
+
+model MockExam {
+  id              String   @id @default(uuid()) @db.Uuid
+  subjectId       String   @map("subject_id") @db.Uuid
+  title           String
+  durationMinutes Int      @map("duration_minutes")
+  tasks           String[] // task.id в составе пробника
+  maxPrimaryScore Int      @map("max_primary_score")
+  isActive        Boolean  @default(true) @map("is_active")
+
+  subject Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  results MockExamResult[]
+
+  @@map("mock_exams")
+}
+
+model MockExamResult {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  mockExamId   String   @map("mock_exam_id") @db.Uuid
+  answers      Json
+  primaryScore Int      @map("primary_score")
+  testScore    Int?     @map("test_score")
+  weakTopics   String[] @map("weak_topics")
+  aiSummary    Json?    @map("ai_summary")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mockExam MockExam @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mock_exam_results")
+}
+
+// ------------------------------------------------------------
+//  Подписки и платежи
+// ------------------------------------------------------------
+
+model Subscription {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  planName  String             @map("plan_name") // FREE | PRO | PRO_PLUS
+  status    SubscriptionStatus @default(TRIAL)
+  limits    Json // { aiChecksPerDay, checkTypes, maxSubjects }
+  provider  String?
+  startedAt DateTime           @default(now()) @map("started_at")
+  expiresAt DateTime?          @map("expires_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  subscriptionId String        @map("subscription_id") @db.Uuid
+  provider       String
+  externalId     String?       @map("external_id")
+  amount         Decimal       @db.Decimal(10, 2)
+  currency       String        @default("RUB")
+  status         PaymentStatus @default(PENDING)
+  webhookStatus  String?       @map("webhook_status")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@map("payments")
+}
+
+// ------------------------------------------------------------
+//  Уведомления, аналитика, промпты (админка)
+// ------------------------------------------------------------
+
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  channel   NotificationChannel
+  title     String
+  body      String
+  isRead    Boolean             @default(false) @map("is_read")
+  sentAt    DateTime?           @map("sent_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  name      String // напр. essay_checked, plan_generated, paywall_shown
+  props     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([name])
+  @@index([userId])
+  @@map("analytics_events")
+}
+
+// Версионируемые промпты для AI Orchestrator (правит админ)
+model PromptTemplate {
+  id        String        @id @default(uuid()) @db.Uuid
+  key       String // напр. essay_check_ru
+  version   Int           @default(1)
+  type      AiRequestType
+  template  String
+  isActive  Boolean       @default(true) @map("is_active")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  @@unique([key, version])
+  @@map("prompt_templates")
+}
