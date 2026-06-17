@@ -73,8 +73,6 @@ export class StudyPlanService {
     ]);
     if (tasks.length === 0) return null;
 
-    const topicById = new Map(topics.map((t) => [t.id, t]));
-
     // Мета по номеру задания: список заданий-вариантов, тема, сложность, макс. балл.
     const numbers = new Map<number, { taskIds: string[]; topicId: string | null; difficulty: number; maxScore: number }>();
     for (const t of tasks) {
@@ -100,7 +98,9 @@ export class StudyPlanService {
     for (const [n, meta] of numbers) {
       const ratio = readiness.get(n);
       if (ratio == null || ratio >= 1) continue;
-      const difficulty = (meta.topicId && topicById.get(meta.topicId)?.difficultyLevel) || meta.difficulty || 1;
+      // Сложность — по уровню задания из методкарты (task.difficulty: Б=1/П=2/В=3),
+      // а не по теме (у тем уровень не задан и одинаков).
+      const difficulty = meta.difficulty || 1;
       targets.push({ n, ratio, difficulty, topicId: meta.topicId, taskIds: meta.taskIds });
     }
     if (targets.length === 0) return null; // всё закрыто — план не нужен

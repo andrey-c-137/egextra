@@ -66,6 +66,7 @@ export class MockExamsService {
               user: `Задание:\n${task.text}\n\nОтвет ученика:\n${answer}`, jsonMode: true,
             });
             score = Math.max(0, Math.min(task.maxScore, Math.round(data.score_estimate ?? 0)));
+            isCorrect = score >= task.maxScore;
             checking = CheckingType.AI;
           } catch { needsManual++; }
         } else needsManual++;
@@ -156,6 +157,12 @@ export class MockExamsService {
     return variants.includes(this.normalize(answer));
   }
   private normalize(s: string): string {
-    return (s ?? '').toLowerCase().replace(/ё/g, 'е').replace(/[\s.,;:!?'"«»()\-–—]/g, '').trim();
+    return (s ?? '')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/\s+/g, '')
+      .replace(/,/g, '.')
+      .replace(/[«»"'()!?;:]/g, '')
+      .replace(/\.+$/, '');
   }
 }
