@@ -28,6 +28,7 @@ export class AuthService {
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
+        name: dto.name?.trim() || null,
         phone: dto.phone,
         passwordHash,
         role: Role.STUDENT,
@@ -81,7 +82,7 @@ export class AuthService {
   async me(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, role: true, studentProfile: true },
+      select: { id: true, email: true, name: true, role: true, studentProfile: true },
     });
   }
 
@@ -108,7 +109,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
     };
   }
 

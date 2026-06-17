@@ -121,6 +121,7 @@ enum NotificationChannel {
 model User {
   id              String    @id @default(uuid()) @db.Uuid
   email           String    @unique
+  name            String?
   phone           String?   @unique
   passwordHash    String    @map("password_hash")
   role            Role      @default(STUDENT)
@@ -369,6 +370,7 @@ model StudyPlanDay {
   priority         Int           @default(0) // меньше = выше в плане
   topics           String[] // topic.id на день
   tasks            String[] // task.id на день
+  items            Json? // PlanItem[] — типизированные задачи дня (новый календарный план)
   estimatedMinutes Int?          @map("estimated_minutes")
   status           PlanDayStatus @default(PLANNED)
 

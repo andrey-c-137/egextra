@@ -2,12 +2,13 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/co
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireActiveSubscriptionGuard } from '../../common/guards/subscription.guard';
 import { MockExamsService } from './mock-exams.service';
 
 // Mock Exam Module — полные пробники: прохождение, ручной ввод, история, динамика
 @ApiTags('mock-exams')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequireActiveSubscriptionGuard)
 @Controller('mock-exams')
 export class MockExamsController {
   constructor(private readonly mockExams: MockExamsService) {}

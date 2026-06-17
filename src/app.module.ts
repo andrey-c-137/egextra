@@ -16,6 +16,7 @@ import { ProgressModule } from './modules/progress/progress.module';
 import { MockExamsModule } from './modules/mock-exams/mock-exams.module';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 import { ScoreForecastModule } from './modules/score-forecast/score-forecast.module';
+import { ReadinessModule } from './modules/readiness/readiness.module';
 import { ParentReportModule } from './modules/parent-report/parent-report.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -43,6 +44,7 @@ import { HealthModule } from './modules/health/health.module';
     MockExamsModule,
     RecommendationsModule,
     ScoreForecastModule,
+    ReadinessModule,
     ParentReportModule,
     SubscriptionsModule,
     NotificationsModule,

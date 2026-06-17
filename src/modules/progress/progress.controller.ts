@@ -3,12 +3,13 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { TopicStatus } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireActiveSubscriptionGuard } from '../../common/guards/subscription.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Progress Module — статистика, слабые темы, точность, streak (эндпойнты Progress из 7.5)
 @ApiTags('progress')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequireActiveSubscriptionGuard)
 @Controller('progress')
 export class ProgressController {
   constructor(private readonly prisma: PrismaService) {}

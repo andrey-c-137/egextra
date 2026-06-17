@@ -2,12 +2,13 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireActiveSubscriptionGuard } from '../../common/guards/subscription.guard';
 import { ScoreForecastService } from './score-forecast.service';
 
 // Score Forecast Module — диапазон текущих баллов и вероятность достижения цели
 @ApiTags('score-forecast')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequireActiveSubscriptionGuard)
 @Controller('score-forecast')
 export class ScoreForecastController {
   constructor(private readonly forecastService: ScoreForecastService) {}

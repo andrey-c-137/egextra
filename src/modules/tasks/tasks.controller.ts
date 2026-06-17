@@ -2,13 +2,14 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/co
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireActiveSubscriptionGuard } from '../../common/guards/subscription.guard';
 import { AnswersService } from '../answers/answers.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Task Bank Module — эндпойнты Tasks из 7.5
 @ApiTags('tasks')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequireActiveSubscriptionGuard)
 @Controller('tasks')
 export class TasksController {
   constructor(
@@ -21,6 +22,15 @@ export class TasksController {
     return this.prisma.task.findMany({
       where: { subjectId: subjectId || undefined, topicId: topicId || undefined },
       take: 50,
+    });
+  }
+
+  // Один активный вариант задания по номеру (для практики по заданию №N).
+  @Get('by-number')
+  byNumber(@Query('subjectId') subjectId: string, @Query('number') number: string) {
+    return this.prisma.task.findFirst({
+      where: { subjectId, egeTaskNumber: Number(number), isActive: true },
+      orderBy: { id: 'asc' },
     });
   }
 

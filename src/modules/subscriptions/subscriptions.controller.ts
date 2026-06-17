@@ -1,23 +1,37 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { PrismaService } from '../../prisma/prisma.service';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { SubscriptionsService } from './subscriptions.service';
 
-// Subscription Module — тарифы, лимиты, платежи, webhook (эндпойнты Subscription из 7.5)
+// Subscription Module — тарифы, доступ к кабинету, платежи, dev-управление
 @ApiTags('subscription')
 @Controller('subscription')
 export class SubscriptionsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly subscriptions: SubscriptionsService) {}
+
+  // Каталог тарифов — публичный (нужен лендингу до входа).
+  @Get('plans')
+  plans() {
+    return this.subscriptions.catalog();
+  }
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get()
   current(@CurrentUser() user: AuthUser) {
-    return this.prisma.subscription.findFirst({
-      where: { userId: user.id },
-      orderBy: { startedAt: 'desc' },
-    });
+    return this.subscriptions.current(user.id);
+  }
+
+  // Доступ к кабинету: hasAccess + текущий тариф (для гейтинга на фронте).
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('access')
+  access(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.access(user.id);
   }
 
   @ApiBearerAuth()
@@ -35,10 +49,21 @@ export class SubscriptionsController {
     return { received: true, payload };
   }
 
+  // --- DEV / ADMIN: тестирование тарифов без оплаты ---
+
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @Post('cancel')
-  cancel(@CurrentUser() user: AuthUser) {
-    return { userId: user.id, status: 'cancel-scheduled' };
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Post('dev/set')
+  devSet(@CurrentUser() user: AuthUser, @Body('planCode') planCode: string) {
+    return this.subscriptions.setPlan(user.id, planCode);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Post('dev/clear')
+  devClear(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.clearPlan(user.id);
   }
 }

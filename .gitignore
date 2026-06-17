@@ -18,6 +18,9 @@ npm-debug.log*
 # prisma
 prisma/*.db
 
+# binaries / tools
+cloudflared.exe
+
 # editor / os
 .idea/
 .vscode/
