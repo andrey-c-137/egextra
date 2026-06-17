@@ -1,20 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AnswerType, CheckingType } from '@prisma/client';
+import { AiRequestType, AnswerType, CheckingType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AiOrchestratorService } from '../ai/ai-orchestrator.service';
+import { PromptsService } from '../ai/prompts/prompts.service';
+import { getEssayPrompt } from '../ai/prompts/essay-grading';
 import { ProgressService } from '../progress/progress.service';
 import { StudyPlanService } from '../study-plan/study-plan.service';
 
 interface PerTask { taskId: string; egeTaskNumber: number | null; topicId: string | null; score: number; maxScore: number }
 
 /**
- * Mock Exam Module — полные пробники: прохождение с автоскорингом короткой части,
- * ручной ввод результата прошлого пробника, история с фильтром и динамика баллов.
- * После результата пересобирает план подготовки.
+ * Mock Exam Module — полные пробники: прохождение с автоскорингом короткой части
+ * и ИИ-проверкой развёрнутых заданий по русскому, ручной ввод результата прошлого
+ * пробника, история с фильтром и динамика баллов. После результата пересобирает план.
  */
 @Injectable()
 export class MockExamsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly ai: AiOrchestratorService,
+    private readonly prompts: PromptsService,
     private readonly progress: ProgressService,
     private readonly plans: StudyPlanService,
   ) {}
@@ -31,7 +36,10 @@ export class MockExamsService {
   async finish(userId: string, mockExamId: string, answers: Record<string, string>) {
     const mock = await this.prisma.mockExam.findUnique({ where: { id: mockExamId } });
     if (!mock) throw new NotFoundException('Пробник не найден');
-    const tasks = await this.prisma.task.findMany({ where: { id: { in: mock.tasks } } });
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: mock.tasks } },
+      include: { subject: { select: { code: true, examType: true } } },
+    });
 
     const perTask: PerTask[] = [];
     let autoChecked = 0;
@@ -40,16 +48,36 @@ export class MockExamsService {
     for (const task of tasks) {
       const answer = answers[task.id];
       let score = 0;
+      let checking: CheckingType = CheckingType.AUTO;
+      let isCorrect = false;
+
       if (task.answerType === AnswerType.SHORT) {
         autoChecked++;
-        const isCorrect = answer != null && answer !== '' && this.matches(answer, task.correctAnswer);
+        isCorrect = answer != null && answer !== '' && this.matches(answer, task.correctAnswer);
         score = isCorrect ? task.maxScore : 0;
-        await this.prisma.userAnswer.create({
-          data: { userId, taskId: task.id, answer: answer ?? '', isCorrect, score, checkingType: CheckingType.AUTO },
-        });
-        await this.progress.recordAnswer(userId, task);
+      } else if (task.answerType === AnswerType.ESSAY && answer && answer.trim()) {
+        // Развёрнутый ответ по русскому → ИИ-проверка по критериям (Grok).
+        const prompt = getEssayPrompt(task.subject.examType, task.subject.code, task.egeTaskNumber);
+        if (prompt) {
+          try {
+            const system = await this.prompts.getSystem(prompt.key, prompt.system);
+            const { data } = await this.ai.run<{ score_estimate?: number }>({
+              userId, type: AiRequestType.CHECK_ESSAY, system,
+              user: `Задание:\n${task.text}\n\nОтвет ученика:\n${answer}`, jsonMode: true,
+            });
+            score = Math.max(0, Math.min(task.maxScore, Math.round(data.score_estimate ?? 0)));
+            checking = CheckingType.AI;
+          } catch { needsManual++; }
+        } else needsManual++;
       } else {
         needsManual++;
+      }
+
+      if (task.answerType === AnswerType.SHORT || checking === CheckingType.AI) {
+        await this.prisma.userAnswer.create({
+          data: { userId, taskId: task.id, answer: answer ?? '', isCorrect, score, checkingType: checking },
+        });
+        await this.progress.recordAnswer(userId, task);
       }
       perTask.push({ taskId: task.id, egeTaskNumber: task.egeTaskNumber, topicId: task.topicId, score, maxScore: task.maxScore });
     }

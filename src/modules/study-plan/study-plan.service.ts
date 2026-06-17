@@ -62,12 +62,12 @@ export class StudyPlanService {
   async rebuild(userId: string, subjectId: string) {
     const [tasks, topics, profile] = await Promise.all([
       this.prisma.task.findMany({
-        where: { subjectId, egeTaskNumber: { not: null } },
+        where: { subjectId, egeTaskNumber: { not: null }, isActive: true },
         select: { id: true, egeTaskNumber: true, topicId: true, maxScore: true, difficulty: true },
       }),
       this.prisma.topic.findMany({
         where: { subjectId },
-        select: { id: true, name: true, difficultyLevel: true },
+        select: { id: true, name: true, difficultyLevel: true, egeTaskNumbers: true },
       }),
       this.prisma.studentProfile.findUnique({ where: { userId } }),
     ]);
@@ -111,28 +111,30 @@ export class StudyPlanService {
       .sort((a, b) => a.difficulty - b.difficulty || b.ratio - a.ratio);
     const quickSet = new Set(quickWins.map((t) => t.n));
 
-    // (2) Темы по пересечению: тема в ≥2 незакрытых заданиях.
-    const byTopic = new Map<string, Target[]>();
-    for (const t of targets) if (t.topicId) (byTopic.get(t.topicId) ?? byTopic.set(t.topicId, []).get(t.topicId)!).push(t);
-    const leverageTopics = [...byTopic.entries()]
-      .filter(([, arr]) => arr.length >= 2)
-      .map(([topicId, arr]) => ({
-        topicId,
-        name: topicById.get(topicId)?.name ?? 'Тема',
-        count: arr.length,
-        gap: arr.reduce((s, t) => s + (1 - t.ratio), 0),
-        numbers: arr.map((t) => t.n).sort((a, b) => a - b),
-      }))
+    // (2) Темы по пересечению: тема (из файла тем) покрывает ≥2 незакрытых задания.
+    //     Закрыв такую тему, поднимаем сразу несколько заданий.
+    const targetByN = new Map(targets.map((t) => [t.n, t]));
+    const leverageTopics = topics
+      // отбрасываем мета-темы-«каталоги» (покрывают слишком много заданий — неконкретны)
+      .filter((tp) => tp.egeTaskNumbers.length > 0 && tp.egeTaskNumbers.length <= 8)
+      .map((tp) => {
+        const nums = tp.egeTaskNumbers.filter((n) => targetByN.has(n));
+        return { topicId: tp.id, name: tp.name, numbers: nums, count: nums.length, gap: nums.reduce((s, n) => s + (1 - targetByN.get(n)!.ratio), 0) };
+      })
+      .filter((t) => t.count >= 2)
       .sort((a, b) => b.count - a.count || b.gap - a.gap);
 
-    // (3) Тяжёлые/нули: остальные незакрытые, кроме покрытых темой-рычагом
-    //     (их закроет день темы) и быстрых побед. Нули — в конец.
-    const leverageTopicIds = new Set(leverageTopics.map((l) => l.topicId));
+    // (3) Тяжёлые/нули: остальные незакрытые, кроме покрытых темой-рычагом и быстрых побед.
+    const leverageNumbers = new Set<number>(leverageTopics.flatMap((l) => l.numbers));
     const hard = targets
-      .filter((t) => !quickSet.has(t.n) && !(t.topicId && leverageTopicIds.has(t.topicId)))
+      .filter((t) => !quickSet.has(t.n) && !leverageNumbers.has(t.n))
       .sort((a, b) => b.ratio - a.ratio);
 
-    const tasksOfTopic = (topicId: string) => tasks.filter((t) => t.topicId === topicId).map((t) => t.id);
+    const topicNumbers = new Map(topics.map((t) => [t.id, t.egeTaskNumbers]));
+    const tasksOfTopic = (topicId: string) => {
+      const nums = topicNumbers.get(topicId) ?? [];
+      return tasks.filter((t) => t.egeTaskNumber != null && nums.includes(t.egeTaskNumber)).map((t) => t.id);
+    };
 
     // Собираем дни.
     const days: PlanDay[] = [];

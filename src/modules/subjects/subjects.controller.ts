@@ -21,8 +21,23 @@ export class SubjectsController {
     });
   }
 
+  // Задания темы = активные задания предмета, чьи номера входят в тему (Topic.egeTaskNumbers).
+  // На номер задания возвращаем один представитель (остальные варианты — «решать похожие»).
   @Get('topics/:id/tasks')
-  tasks(@Param('id') id: string) {
-    return this.prisma.task.findMany({ where: { topicId: id } });
+  async tasks(@Param('id') id: string) {
+    const topic = await this.prisma.topic.findUnique({ where: { id } });
+    if (!topic) return [];
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        subjectId: topic.subjectId,
+        isActive: true,
+        egeTaskNumber: { in: topic.egeTaskNumbers },
+      },
+      orderBy: [{ egeTaskNumber: 'asc' }, { id: 'asc' }],
+    });
+    // по одному заданию на номер
+    const byNumber = new Map<number, (typeof tasks)[number]>();
+    for (const t of tasks) if (t.egeTaskNumber != null && !byNumber.has(t.egeTaskNumber)) byNumber.set(t.egeTaskNumber, t);
+    return [...byNumber.values()];
   }
 }

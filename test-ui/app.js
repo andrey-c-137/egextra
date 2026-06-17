@@ -136,7 +136,7 @@ async function boot() {
 function go(tab) { S.tab = tab; renderApp(); }
 
 /* ===================== AUTH ===================== */
-function renderAuth(mode = "login") {
+function renderAuth(mode = "login", prefillEmail = "") {
   app().innerHTML = `
   <div class="center-wrap">
     <div class="auth-card">
@@ -157,9 +157,10 @@ function renderAuth(mode = "login") {
           <button class="${mode==="login"?"on":""}" id="tLogin">Вход</button>
           <button class="${mode==="register"?"on":""}" id="tReg">Регистрация</button>
         </div>
-        <div class="field"><label>Email</label><input id="email" type="email" placeholder="you@example.com" value=""></div>
+        <div class="field"><label>Email</label><input id="email" type="email" placeholder="you@example.com" value="${esc(prefillEmail||"")}"></div>
         <div class="field"><label>Пароль</label><input id="pass" type="password" placeholder="минимум 8 символов" value=""></div>
         <button class="btn block" id="submit">${mode === "login" ? "Войти" : "Зарегистрироваться"}</button>
+        <div id="authErr" style="margin-top:14px"></div>
         <p class="sub" style="text-align:center;margin-top:16px;font-size:13px">Демо-режим • данные хранятся в тестовой БД</p>
       </div>
     </div>
@@ -169,6 +170,7 @@ function renderAuth(mode = "login") {
   const submit = $("#submit");
   submit.onclick = async () => {
     const email = $("#email").value.trim(), password = $("#pass").value;
+    $("#authErr").innerHTML = "";
     if (!email || !password) return toast("Заполните поля", "Email и пароль обязательны", "warn");
     submit.disabled = true; submit.innerHTML = `<span class="spinner" style="border-top-color:#fff"></span>`;
     try {
@@ -177,8 +179,16 @@ function renderAuth(mode = "login") {
       toast(mode === "login" ? "Вход выполнен" : "Аккаунт создан", "", "ok");
       boot();
     } catch (e) {
-      toast("Не удалось", e.message, "err");
       submit.disabled = false; submit.textContent = mode === "login" ? "Войти" : "Зарегистрироваться";
+      // Нет аккаунта на эту почту → показываем ссылку на регистрацию.
+      if (mode === "login" && (e.status === 404 || /нет аккаунта/i.test(e.message || ""))) {
+        $("#authErr").innerHTML = `<div class="card" style="box-shadow:none;border:1.5px solid #fecaca;background:#fef2f2;padding:14px">
+          <div style="font-weight:700;color:#dc2626;margin-bottom:4px">Нет аккаунта на эту почту</div>
+          <div style="color:var(--mut);font-size:13.5px">Проверьте адрес или <a href="#" id="goReg" style="font-weight:700">зарегистрируйтесь</a>.</div></div>`;
+        $("#goReg").onclick = (ev) => { ev.preventDefault(); renderAuth("register", email); };
+      } else {
+        toast("Не удалось войти", e.message, "err");
+      }
     }
   };
   $("#pass").addEventListener("keydown", e => { if (e.key === "Enter") submit.click(); });
@@ -416,6 +426,10 @@ function renderWeak(el, weak) {
 }
 
 /* ===================== PRACTICE ===================== */
+// Deep-link из плана: открыть конкретную тему или задание в практике.
+let practiceTarget = null;
+function goPractice(target) { practiceTarget = target || null; go("practice"); }
+
 async function scrPractice() {
   loading();
   const subs = await api("GET", "/profile/subjects").catch(() => []);
@@ -431,8 +445,20 @@ async function scrPractice() {
     $("#psubs").querySelectorAll(".pick").forEach(x => x.classList.remove("on")); c.classList.add("on");
     practiceTopics(c.dataset.sid);
   });
+
+  // Переход из плана: подсветить предмет и открыть тему/задание.
+  const target = practiceTarget; practiceTarget = null;
+  if (target) {
+    const cell = document.querySelector(`#psubs [data-sid="${target.subjectId}"]`);
+    if (cell) cell.classList.add("on");
+    if (target.taskId) {
+      try { const task = await api("GET", `/tasks/${target.taskId}`); if (task) return openTask(task); } catch {}
+    }
+    if (target.topicId) return practiceTopics(target.subjectId, target.topicId);
+    if (target.subjectId) practiceTopics(target.subjectId);
+  }
 }
-async function practiceTopics(subjectId) {
+async function practiceTopics(subjectId, selectTopicId) {
   const box = $("#ptopics");
   box.innerHTML = `<div class="card" style="margin-top:18px"><div class="spinner"></div></div>`;
   const topics = await api("GET", `/subjects/${subjectId}/topics`).catch(() => []);
@@ -445,6 +471,12 @@ async function practiceTopics(subjectId) {
       $("#ptops").querySelectorAll(".pick").forEach(x => x.classList.remove("on")); c.classList.add("on");
       practiceTasks(c.dataset.tid);
     });
+    // Авто-выбор темы при переходе из плана.
+    if (selectTopicId) {
+      const cell = document.querySelector(`#ptops [data-tid="${selectTopicId}"]`);
+      if (cell) { cell.classList.add("on"); cell.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      practiceTasks(selectTopicId);
+    }
   }
 }
 async function practiceTasks(topicId) {
@@ -487,16 +519,12 @@ function openTask(task) {
     if (!val) return toast("Пусто", "Введите ответ", "warn");
     const btn = $("#send"); btn.disabled = true; btn.innerHTML = `<span class="spinner" style="border-top-color:#fff"></span> ${isEssay?"ИИ проверяет…":"Проверяем…"}`;
     try {
-      if (isEssay) {
-        const r = await api("POST", "/ai/check-essay", { essay: val, topic: task.title });
-        renderEssayResult($("#result"), r.data || r);
-      } else {
-        const r = await api("POST", `/tasks/${task.id}/answer`, { answer: val });
-        renderShortResult($("#result"), r);
-      }
+      const r = await api("POST", `/tasks/${task.id}/answer`, { answer: val });
+      if (isEssay) renderEssayResult($("#result"), r.aiFeedback || r);
+      else renderShortResult($("#result"), r, task);
       loadStreak();
     } catch (e) {
-      toast(e.status === 429 ? "Лимит исчерпан" : "Ошибка", e.message, "err");
+      toast(e.status === 429 ? "Лимит ИИ исчерпан" : "Ошибка", e.message, "err");
     } finally { btn.disabled = false; btn.textContent = isEssay?"Проверить ещё раз":"Проверить ответ"; }
   };
   $("#explain").onclick = async () => {
@@ -510,13 +538,14 @@ function openTask(task) {
     } finally { btn.disabled = false; btn.innerHTML = "🤖 Пояснение ИИ"; }
   };
 }
-function renderShortResult(el, r) {
+function renderShortResult(el, r, task) {
   const ok = r.isCorrect;
   el.innerHTML = `<div class="card" style="box-shadow:none;border:1.5px solid ${ok?"#bbf7d0":"#fecaca"};background:${ok?"#f0fdf4":"#fef2f2"}">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="font-size:30px">${ok?"✅":"❌"}</div>
-      <div><div style="font-weight:800;font-size:17px">${ok?"Верно!":"Неверно"}</div>
+      <div style="flex:1"><div style="font-weight:800;font-size:17px">${ok?"Верно!":"Неверно"}</div>
         <div style="color:var(--mut)">${ok?`+${r.score} балл`:"Ничего страшного — разберём ошибку"}</div></div>
+      ${task?.egeTaskNumber?`<button class="btn sm ghost" id="similar">🔁 Решать похожие</button>`:""}
     </div>
     ${!ok && r.correctAnswer ? `<div style="margin-top:14px;padding:12px 14px;background:#fff;border-radius:10px;border:1px solid #fecaca">
       <span style="color:var(--mut);font-size:13px">Правильный ответ:</span>
@@ -526,6 +555,12 @@ function renderShortResult(el, r) {
       <span style="color:var(--mut);font-size:13px">Точность по теме: <b>${Math.round(r.topicProgress.accuracyPercent)}%</b></span></div>`:""}
     ${!ok ? `<div style="margin-top:10px;color:var(--mut);font-size:13px">💡 Нажмите «Пояснение ИИ», чтобы разобрать решение.</div>` : ""}
   </div>`;
+  const sim = el.querySelector("#similar");
+  if (sim && task) sim.onclick = async () => {
+    sim.disabled = true; sim.innerHTML = `<span class="spinner"></span>`;
+    try { const next = await api("GET", `/tasks/${task.id}/similar`); openTask(next); }
+    catch (e) { toast("Ошибка", e.message, "err"); sim.disabled = false; sim.innerHTML = "🔁 Решать похожие"; }
+  };
   toast(ok ? "Верно! 🎉" : "Не верно", ok ? "" : "Смотрите правильный ответ ниже", ok ? "ok" : "warn");
 }
 function renderExplain(el, d) {
@@ -697,18 +732,25 @@ function renderPlanDays(el, active) {
     <div class="card" style="margin-bottom:16px">
       <h3>📘 ${esc(p.subject?.name||"Предмет")} <span class="tag">${p.days.length} шагов${p.targetScore?(" • цель "+p.targetScore):""}</span></h3>
       <div class="grid" style="gap:12px">
-        ${p.days.map((d, i) => { const k = PLAN_KIND[d.kind] || { ic: "📌", label: "Шаг", cls: "GRAY" }; return `
+        ${p.days.map((d, i) => {
+          const k = PLAN_KIND[d.kind] || { ic: "📌", label: "Шаг", cls: "GRAY" };
+          const isTopic = d.kind === "topic";
+          const target = isTopic
+            ? { subjectId: p.subjectId, topicId: (d.topics || [])[0] }
+            : { subjectId: p.subjectId, taskId: (d.tasks || [])[0], topicId: (d.topics || [])[0] };
+          return `
           <div class="list-row" style="border:1.5px solid var(--line);border-radius:12px;padding:14px;border-left:4px solid var(${d.kind==="quick_win"?"--green":d.kind==="topic"?"--yellow":"--red"})">
             <div class="badge" style="background:#f6f5fd">${k.ic}</div>
             <div class="body">
               <div class="t">${i+1}. ${esc(d.title)} <span class="chip ${k.cls}" style="margin-left:6px">${k.label}</span></div>
               <div class="d">${esc(d.note||"")}</div>
             </div>
-            <button class="btn sm ghost" data-go="practice">Заниматься</button>
-          </div>`; }).join("")}
+            <button class="btn sm ghost" data-target='${encodeURIComponent(JSON.stringify(target))}'>${isTopic ? "Тренироваться по теме" : "Решать задание"}</button>
+          </div>`;
+        }).join("")}
       </div>
     </div>`).join("");
-  el.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go("practice"));
+  el.querySelectorAll("[data-target]").forEach(b => b.onclick = () => goPractice(JSON.parse(decodeURIComponent(b.dataset.target))));
 }
 
 /* ===================== MOCK (полные пробники) ===================== */
@@ -773,7 +815,9 @@ async function takeMock(mock) {
   $("#back").onclick = () => scrMock();
   $("#mtasks").innerHTML = tasks.map(t => `
     <div class="field"><label>№${t.egeTaskNumber||"?"}. ${esc(t.text||t.title||"Задание")}</label>
-      <input data-tid="${t.id}" placeholder="Ваш ответ"></div>`).join("");
+      ${t.answerType==="ESSAY"
+        ? `<textarea data-tid="${t.id}" placeholder="Развёрнутый ответ (проверит ИИ)…" style="min-height:120px"></textarea>`
+        : `<input data-tid="${t.id}" placeholder="Ваш ответ">`}</div>`).join("");
   $("#finish").onclick = async () => {
     const answers = {};
     document.querySelectorAll("[data-tid]").forEach(i => { if (i.value.trim()) answers[i.dataset.tid] = i.value.trim(); });

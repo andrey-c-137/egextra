@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -41,8 +42,10 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
-      throw new UnauthorizedException('Неверный email или пароль');
+    // Отдельный код для «нет аккаунта» — фронт показывает ссылку на регистрацию.
+    if (!user) throw new NotFoundException('Нет аккаунта на эту почту');
+    if (!(await bcrypt.compare(dto.password, user.passwordHash))) {
+      throw new UnauthorizedException('Неверный пароль');
     }
     await this.prisma.user.update({
       where: { id: user.id },

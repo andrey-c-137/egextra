@@ -269,6 +269,7 @@ model Task {
   difficulty    Int        @default(1)
   maxScore      Int        @default(1) @map("max_score")
   source        String?
+  isActive      Boolean    @default(true) @map("is_active")
   createdAt     DateTime   @default(now()) @map("created_at")
 
   subject Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)

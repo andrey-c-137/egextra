@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AiRequestType, AnswerType, CheckingType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiOrchestratorService } from '../ai/ai-orchestrator.service';
+import { PromptsService } from '../ai/prompts/prompts.service';
+import { getEssayPrompt } from '../ai/prompts/essay-grading';
 import { ProgressService } from '../progress/progress.service';
 import { StudyPlanService } from '../study-plan/study-plan.service';
 
@@ -11,13 +13,18 @@ export class AnswersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiOrchestratorService,
+    private readonly prompts: PromptsService,
     private readonly progress: ProgressService,
     private readonly plans: StudyPlanService,
   ) {}
 
   async submit(userId: string, taskId: string, answer: string) {
-    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: { subject: { select: { code: true, examType: true } } },
+    });
     if (!task) throw new NotFoundException('Задание не найдено');
+    if (!task.isActive) throw new BadRequestException('Это задание пока недоступно');
 
     // Короткий ответ → дешёвая автопроверка по эталону.
     if (task.answerType === AnswerType.SHORT) {
@@ -32,15 +39,35 @@ export class AnswersService {
       return { ...saved, correctAnswer: task.correctAnswer ?? null };
     }
 
-    // Сложный ответ (сочинение/код) → ИИ-проверка через оркестратор.
-    const { data } = await this.ai.run<{
-      score_estimate?: number;
-      main_mistakes?: string[];
-    }>({
+    // Развёрнутый ответ по русскому (сочинение/изложение) → ИИ-проверка по критериям.
+    const essayPrompt = getEssayPrompt(task.subject.examType, task.subject.code, task.egeTaskNumber);
+    if (task.answerType === AnswerType.ESSAY && essayPrompt) {
+      const system = await this.prompts.getSystem(essayPrompt.key, essayPrompt.system);
+      const { data } = await this.ai.run<{ score_estimate?: number; main_mistakes?: string[] }>({
+        userId,
+        type: AiRequestType.CHECK_ESSAY,
+        system,
+        user: `Задание:\n${task.text}\n\nОтвет ученика:\n${answer}`,
+        jsonMode: true,
+      });
+      const score = Math.max(0, Math.min(task.maxScore, Math.round(data.score_estimate ?? 0)));
+      const saved = await this.save(userId, task, {
+        answer,
+        isCorrect: score >= task.maxScore,
+        score,
+        checkingType: CheckingType.AI,
+        aiFeedback: data,
+        mistakes: data.main_mistakes ?? [],
+      });
+      return { ...saved, aiFeedback: data };
+    }
+
+    // Прочие развёрнутые → общий ИИ-разбор.
+    const { data } = await this.ai.run<{ score_estimate?: number; main_mistakes?: string[] }>({
       userId,
       type: AiRequestType.CHECK_ANSWER,
       system:
-        'Ты — эксперт ЕГЭ. Проверь ответ ученика, объясни ошибки. Верни JSON: {score, max_score, is_correct, mistakes[], explanation, confidence_score}.',
+        'Ты — эксперт ЕГЭ. Проверь ответ ученика, объясни ошибки. Верни JSON: {score_estimate, max_score, is_correct, main_mistakes[], explanation, confidence_score}.',
       user: `Задание: ${task.text}\nЭталон: ${task.correctAnswer ?? '—'}\nОтвет ученика: ${answer}`,
       jsonMode: true,
     });
