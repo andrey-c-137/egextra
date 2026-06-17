@@ -15,35 +15,35 @@ import { ExamType, MathLevel } from '@prisma/client';
 
 // Шаг 1: трек ОГЭ/ЕГЭ + класс
 export class SetTrackDto {
-  @IsEnum(ExamType)
+  @IsEnum(ExamType, { message: 'Тип экзамена должен быть ОГЭ или ЕГЭ' })
   examType!: ExamType;
 
-  @IsInt()
-  @Min(8)
-  @Max(11)
+  @IsInt({ message: 'Класс должен быть числом' })
+  @Min(8, { message: 'Класс не меньше 8' })
+  @Max(11, { message: 'Класс не больше 11' })
   grade!: number;
 }
 
 // Один выбранный экзамен
 export class SelectedSubjectDto {
-  @IsUUID()
+  @IsUUID(undefined, { message: 'Некорректный идентификатор предмета' })
   subjectId!: string;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(100)
+  @IsInt({ message: 'Цель по баллам должна быть числом' })
+  @Min(0, { message: 'Цель не меньше 0' })
+  @Max(100, { message: 'Цель не больше 100' })
   targetScore?: number;
 
   @IsOptional()
-  @IsEnum(MathLevel)
+  @IsEnum(MathLevel, { message: 'Некорректный уровень математики' })
   mathLevel?: MathLevel;
 }
 
 // Шаг 2: список экзаменов с целями
 export class SetSubjectsDto {
-  @IsArray()
-  @ArrayMinSize(1)
+  @IsArray({ message: 'Список предметов некорректен' })
+  @ArrayMinSize(1, { message: 'Выберите хотя бы один предмет' })
   @ValidateNested({ each: true })
   @Type(() => SelectedSubjectDto)
   subjects!: SelectedSubjectDto[];

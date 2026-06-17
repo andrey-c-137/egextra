@@ -42,4 +42,14 @@ export class TasksController {
   ) {
     return this.answers.submit(user.id, id, answer);
   }
+
+  // Краткое ИИ-пояснение по заданию (в чём ошибка / как проверить / верный ход).
+  @Post(':id/explain')
+  explain(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body('studentAnswer') studentAnswer?: string,
+  ) {
+    return this.answers.explain(user.id, id, studentAnswer);
+  }
 }

@@ -126,10 +126,7 @@ export class OnboardingService {
     if (examType === ExamType.OGE) {
       if (!codes.has('rus')) throw new BadRequestException('Русский язык обязателен для ОГЭ');
       if (!codes.has('oge_math')) throw new BadRequestException('Математика обязательна для ОГЭ');
-      const electives = subjects.filter((s) => !s.isMandatory).length;
-      if (electives < 2) {
-        throw new BadRequestException('Для ОГЭ нужно минимум 2 предмета по выбору');
-      }
+      // MVP: предметы по выбору пока не поддержаны (только русский + математика).
     }
   }
 

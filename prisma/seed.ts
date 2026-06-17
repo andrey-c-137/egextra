@@ -3,6 +3,7 @@ import {
   ESSAY_CHECK_PROMPT_KEY,
   ESSAY_CHECK_SYSTEM,
 } from '../src/modules/ai/prompts/essay-check.prompt';
+import { seedContent } from './seed-content';
 
 const prisma = new PrismaClient();
 
@@ -46,18 +47,27 @@ const OGE: SubjectSeed[] = [
   { code: 'esp', name: 'Испанский язык' },
 ];
 
+// MVP: активны только эти экзамены (логика и контент пока под них).
+// EGE: русский + математика (профиль/база); OGE: русский + математика.
+const MVP_ACTIVE: Record<string, string[]> = {
+  EGE: ['rus', 'math_prof', 'math_base'],
+  OGE: ['rus', 'oge_math'],
+};
+
 async function seedCatalog(examType: ExamType, list: SubjectSeed[]) {
   for (let i = 0; i < list.length; i++) {
     const s = list[i];
+    const isActive = MVP_ACTIVE[examType]?.includes(s.code) ?? false;
     await prisma.subject.upsert({
       where: { examType_code: { examType, code: s.code } },
-      update: { name: s.name, isMandatory: !!s.mandatory, orderIndex: i, isActive: true },
+      update: { name: s.name, isMandatory: !!s.mandatory, orderIndex: i, isActive },
       create: {
         code: s.code,
         name: s.name,
         examType,
         isMandatory: !!s.mandatory,
         orderIndex: i,
+        isActive,
       },
     });
   }
@@ -101,6 +111,11 @@ async function main() {
       source: 'demo',
     },
   });
+
+  // Демо-контент в формате экзамена: темы (с пересечением номеров заданий),
+  // банк заданий (3/тему) и по 2 полных пробника на каждый из 5 MVP-экзаменов.
+  console.log('📚 Контент:');
+  await seedContent(prisma);
 
   // Активный промпт проверки сочинения (версия 1).
   await prisma.promptTemplate.upsert({

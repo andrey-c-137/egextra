@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AiProvider, AiRequestType } from '@prisma/client';
+import { AiProvider, AiRequestStatus, AiRequestType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AnthropicProvider } from './providers/anthropic.provider';
@@ -89,6 +89,50 @@ export class AiOrchestratorService {
     return fallback;
   }
 
+  /** Биллингуемые типы запросов — считаются в дневной лимит тарифа. */
+  private static readonly BILLABLE: ReadonlySet<AiRequestType> = new Set([
+    AiRequestType.CHECK_ESSAY,
+    AiRequestType.CHECK_ANSWER,
+    AiRequestType.EXPLAIN_TASK,
+    AiRequestType.PHOTO_TASK,
+    AiRequestType.GENERATE_PLAN,
+  ]);
+
+  /**
+   * Проверка дневного лимита ИИ-проверок по тарифу (subscription.limits.aiChecksPerDay).
+   * Кеш-хиты сюда не доходят (проверяется раньше), повторно не списываем.
+   */
+  private async assertQuota(userId: string, type: AiRequestType): Promise<void> {
+    if (!AiOrchestratorService.BILLABLE.has(type)) return;
+
+    const sub = await this.prisma.subscription.findFirst({
+      where: { userId },
+      orderBy: { startedAt: 'desc' },
+    });
+    const limits = (sub?.limits ?? {}) as { aiChecksPerDay?: number };
+    const limit = typeof limits.aiChecksPerDay === 'number' ? limits.aiChecksPerDay : 3;
+    if (limit < 0) return; // отрицательное = безлимит
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const usedToday = await this.prisma.aiRequest.count({
+      where: {
+        userId,
+        requestType: { in: [...AiOrchestratorService.BILLABLE] },
+        status: { in: [AiRequestStatus.DONE, AiRequestStatus.PROCESSING] },
+        createdAt: { gte: startOfDay },
+      },
+    });
+
+    if (usedToday >= limit) {
+      throw new HttpException(
+        `Дневной лимит ИИ-проверок исчерпан (${limit}/день на тарифе ${sub?.planName ?? 'FREE'}). ` +
+          'Оформите подписку для увеличения лимита.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
   async run<T = unknown>(params: OrchestrateParams): Promise<{ data: T; requestId: string }> {
     const tier = TIER_BY_TYPE[params.type];
     const cacheKey = params.cacheable ? this.cacheKey(params) : null;
@@ -103,6 +147,9 @@ export class AiOrchestratorService {
         return { data: cached.outputPayload as T, requestId: cached.id };
       }
     }
+
+    // Лимит тарифа проверяем только для реальных (не кешированных) платных запросов.
+    if (params.userId) await this.assertQuota(params.userId, params.type);
 
     const provider = this.pickProvider(Boolean(params.imageBase64));
     const req: AiCompletionRequest = {

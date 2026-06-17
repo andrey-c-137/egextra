@@ -1,0 +1,1 @@
+Положите сюда variant-01.txt, variant-02.txt … (формат — см. ../_TEMPLATE.txt и ../README.md)

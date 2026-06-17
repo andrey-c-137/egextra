@@ -1,7 +1,7 @@
 import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
-  @IsEmail()
+  @IsEmail({}, { message: 'Введите корректный email' })
   email!: string;
 
   @IsString()
@@ -14,10 +14,10 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @IsEmail()
+  @IsEmail({}, { message: 'Введите корректный email' })
   email!: string;
 
-  @IsString()
+  @IsString({ message: 'Введите пароль' })
   password!: string;
 }
 

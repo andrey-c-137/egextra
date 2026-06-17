@@ -15,7 +15,14 @@ export class ProgressController {
 
   @Get()
   overview(@CurrentUser() user: AuthUser) {
-    return this.prisma.topicProgress.findMany({ where: { userId: user.id } });
+    return this.prisma.topicProgress.findMany({
+      where: { userId: user.id },
+      orderBy: { accuracyPercent: 'asc' },
+      include: {
+        topic: { select: { name: true, egeBlock: true } },
+        subject: { select: { name: true, code: true } },
+      },
+    });
   }
 
   @Get('weak-topics')
@@ -23,17 +30,42 @@ export class ProgressController {
     return this.prisma.topicProgress.findMany({
       where: { userId: user.id, status: { in: [TopicStatus.RED, TopicStatus.YELLOW] } },
       orderBy: { accuracyPercent: 'asc' },
+      include: {
+        topic: { select: { name: true, egeBlock: true } },
+        subject: { select: { name: true, code: true } },
+      },
     });
   }
 
   @Get('streak')
   async streak(@CurrentUser() user: AuthUser) {
-    // Заглушка: реальный streak считается по дням активности (user_answers).
-    const last = await this.prisma.userAnswer.findFirst({
+    // Реальный streak: число подряд идущих дней с активностью, заканчивая сегодня/вчера.
+    const answers = await this.prisma.userAnswer.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
     });
-    return { streakDays: 0, lastActivityAt: last?.createdAt ?? null };
+    if (answers.length === 0) return { streakDays: 0, lastActivityAt: null };
+
+    const dayKey = (d: Date) => {
+      const x = new Date(d);
+      x.setHours(0, 0, 0, 0);
+      return x.getTime();
+    };
+    const days = [...new Set(answers.map((a) => dayKey(a.createdAt)))].sort((a, b) => b - a);
+    const DAY = 86_400_000;
+    const today = dayKey(new Date());
+
+    // Streak активен, только если последняя активность была сегодня или вчера.
+    let streak = 0;
+    if (days[0] === today || days[0] === today - DAY) {
+      streak = 1;
+      for (let i = 1; i < days.length; i++) {
+        if (days[i - 1] - days[i] === DAY) streak++;
+        else break;
+      }
+    }
+    return { streakDays: streak, lastActivityAt: answers[0].createdAt };
   }
 
   @Get('summary')

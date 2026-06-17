@@ -362,6 +362,10 @@ model StudyPlanDay {
   id               String        @id @default(uuid()) @db.Uuid
   planId           String        @map("plan_id") @db.Uuid
   date             DateTime      @db.Date
+  title            String? // напр. «Закрыть тему: Стереометрия» / «Добить задание №7»
+  note             String? // причина приоритета (для пользователя)
+  kind             String? // quick_win | topic | task | weak
+  priority         Int           @default(0) // меньше = выше в плане
   topics           String[] // topic.id на день
   tasks            String[] // task.id на день
   estimatedMinutes Int?          @map("estimated_minutes")
